@@ -30,10 +30,10 @@
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-import org.checkerframework.checker.units.qual.A;
 
 
 /*
@@ -52,71 +52,50 @@ import org.checkerframework.checker.units.qual.A;
 @TeleOp(name="Basic Motion Eval", group="Idk What This Is For")
 public class BasicMotionEval extends LinearOpMode {
 
-    private ElapsedTime runtime = new ElapsedTime();
+    static final double ROBOT_UPDATE_RATE_MS = 1000.0/10;
+    static final double TELEMETRY_UPDATE_RATE_MS = 1000.0/4;
+    static final double SERVO_MAX_POS = 1.00;
+    static final double SERVO_MIN_POS = 0.00;
+
+    private final ElapsedTime gameTimer = new ElapsedTime();
+    private final ElapsedTime robotTimer = new ElapsedTime();
+    private final ElapsedTime telemetryTimer = new ElapsedTime();
+
 
     // Motors
-    private DcMotor[] motors;
-    private DcMotor m0 = null;
-    private DcMotor m1 = null;
-    private DcMotor m2 = null;
-    private DcMotor m3 = null;
-
+    private DcMotorEx[] motors;
 
     // Servos
     private Servo[] servos;
-    private Servo s0 = null;
-    private Servo s1 = null;
-    private Servo s2 = null;
-    private Servo s3 = null;
-    private Servo s4 = null;
-    private Servo s5 = null;
+
 
     // Track power levels
     private double[] motorPowers = null;
     private double[] servoPowers = null;
 
-    // DPad Action States
-    private boolean[] lastDPadState = null;
-    private boolean[] currentDPadState = null;
-
-    private boolean dpadUpBtnPressed = false;
-    private boolean dpadRightBtnPressed = false;
-    private boolean dpadDownBtnPressed = false;
-    private boolean dpadLeftBtnPressed = false;
-
-    private boolean dpadUpBtnReleased = false;
-    private boolean dpadRightBtnReleased = false;
-    private boolean dpadDownBtnReleased = false;
-    private boolean dpadLeftBtnReleased = false;
-
     // Servos
-    private int[] activeServos = null;
-
-    static final double SERVO_MAX_POS = 0.85;
-    static final double SERVO_MIN_POS = 0.15;
+    private int activeServoNdx;
 
 
     @Override
     public void runOpMode() {
-        telemetry.addData("Status", "Initialized");
-        telemetry.update();
+        // Initialize the hardware variables. Note that strings mentioned here are set within
+        // the robot's configuration, and must exist within the "active" configuration.
+        motors = new DcMotorEx[]{
+            hardwareMap.get(DcMotorEx.class, "m0"),
+            hardwareMap.get(DcMotorEx.class, "m1"),
+            hardwareMap.get(DcMotorEx.class, "m2"),
+            hardwareMap.get(DcMotorEx.class, "m3")
+        };
 
-        // Initialize the hardware variables. Note that the strings used here as parameters
-        // to 'get' must correspond to the names assigned during the robot configuration
-        // step (using the FTC Robot Controller app on the phone).
-        m0  = hardwareMap.get(DcMotor.class, "m0");
-        m1 = hardwareMap.get(DcMotor.class, "m1");
-        m2  = hardwareMap.get(DcMotor.class, "m2");
-        m3 = hardwareMap.get(DcMotor.class, "m3");
-        motors = new DcMotor[]{ m0, m1, m2, m3 };
-
-        s0  = hardwareMap.get(Servo.class, "s0");
-        s1  = hardwareMap.get(Servo.class, "s1");
-        s2  = hardwareMap.get(Servo.class, "s2");
-        s3  = hardwareMap.get(Servo.class, "s3");
-        s4  = hardwareMap.get(Servo.class, "s4");
-        s5  = hardwareMap.get(Servo.class, "s5");
-        servos = new Servo[]{ s0, s1, s2, s3, s4, s5 };
+        servos = new Servo[]{
+            hardwareMap.get(Servo.class, "s0"),
+            hardwareMap.get(Servo.class, "s1"),
+            hardwareMap.get(Servo.class, "s2"),
+            hardwareMap.get(Servo.class, "s3"),
+            hardwareMap.get(Servo.class, "s4"),
+            hardwareMap.get(Servo.class, "s5")
+        };
 
 
         // Track power levels
@@ -124,106 +103,93 @@ public class BasicMotionEval extends LinearOpMode {
         servoPowers = new double[]{ 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 };
 
         // Init controllable servos
-        activeServos = new int[]{ 0, 1 };
+        activeServoNdx = 0;
 
         // Init motors and servos
         for(int ndx=0; ndx < motors.length; ndx++) { motors[ndx].setPower(motorPowers[ndx]); }
         for(int ndx=0; ndx < servos.length; ndx++) { servos[ndx].setPosition(servoPowers[ndx]); }
 
 
-        // Wait for the game to start (driver presses PLAY)
+        // Wait until driver presses PLAY button
+        telemetry.addData("Status", "READY");
+        telemetry.update();
         waitForStart();
-        runtime.reset();
 
-        // run until the end of the match (driver presses STOP)
+        // Run until driver presses STOP button
+        gameTimer.reset();
+        robotTimer.reset();
+        telemetryTimer.reset();
         while (opModeIsActive()) {
+            if(robotTimer.milliseconds() >= ROBOT_UPDATE_RATE_MS ) {
+                robotTimer.reset();
 
-            // Update DPad action (pressed/released) states
-            // TODO: Only update this every XXXX Hz
-            updateBtnActions();
+                // Set motor powers
+                motorPowers[0] = gamepad1.left_stick_x;
+                motorPowers[1] = gamepad1.left_stick_y * -1;
+                motorPowers[2] = gamepad1.right_stick_x;
+                motorPowers[3] = gamepad1.right_stick_y * -1;
+                for (int ndx = 0; ndx < motors.length; ndx++) {
+                    motors[ndx].setPower(motorPowers[ndx]);
+                }
 
 
-            // Set motor powers
-            motorPowers[0] = gamepad1.left_stick_x;
-            motorPowers[1] = gamepad1.left_stick_y;
-            motorPowers[2] = gamepad1.right_stick_x;
-            motorPowers[3] = gamepad1.right_stick_y;
-            for(int ndx=0; ndx < motors.length; ndx++) { motors[ndx].setPower(motorPowers[ndx]); }
+                // Update active servos
+                if (gamepad1.dpadRightWasReleased()) {
+                    activeServoNdx++;
+                    if (activeServoNdx >= servos.length) {
+                        activeServoNdx = 0;
+                    }
+                }
+                if (gamepad1.dpadLeftWasReleased()) {
+                    activeServoNdx--;
+                    if (activeServoNdx <= 0) {
+                        activeServoNdx = servos.length - 1;
+                    }
+                }
 
+                // Update active servo powers
+                if (gamepad1.dpadUpWasReleased()) {
+                    servoPowers[activeServoNdx] += 0.05;
+                } else if (gamepad1.dpadDownWasReleased()) {
+                    servoPowers[activeServoNdx] -= 0.05;
+                }
 
-            // Update active servos
-            int sL = activeServos[0];
-            int sR = activeServos[1];
-            if (dpadRightBtnReleased) {
-                sL++;
-                if(sL == sR) { sL++; }
-                if(sL >= servos.length) { sL=0; }
+                if(servoPowers[activeServoNdx] > SERVO_MAX_POS ) {
+                    servoPowers[activeServoNdx] = SERVO_MAX_POS;
+                }
+                if(servoPowers[activeServoNdx] < SERVO_MIN_POS ) {
+                    servoPowers[activeServoNdx] = SERVO_MIN_POS;
+                }
+
+                // Set servo power
+                //  Use "A" and "B" buttons as overrides for servos.
+                //  Quick and easy way to set to max and set to min, while not forgetting the
+                //   servo's last position.
+                servos[activeServoNdx].setPosition(
+                    (gamepad1.b) ? SERVO_MAX_POS :
+                        ((gamepad1.a) ? SERVO_MIN_POS :
+                            servoPowers[activeServoNdx]));
+
             }
-            if (dpadLeftBtnReleased) {
-                sL--;
-                if(sL == sR) { sL--; }
-                if(sL <= 0) { sL = servos.length-1; }
+
+            if(telemetryTimer.milliseconds() >= TELEMETRY_UPDATE_RATE_MS ) {
+                telemetryTimer.reset();
+
+                telemetry.addData("Elapsed Time", gameTimer.toString());
+                // Show data to driver
+                telemetry.addData("Motors", "%.02f, %.02f, %.02f, %.02f",
+                        motorPowers[0], motorPowers[1], motorPowers[2], motorPowers[3]);
+                telemetry.addData("Servos", "%.02f, %.02f, %.02f, %.02f, %.02f, %.02f",
+                    servos[0].getPosition(),
+                    servos[1].getPosition(),
+                    servos[2].getPosition(),
+                    servos[3].getPosition(),
+                    servos[4].getPosition(),
+                    servos[5].getPosition()
+                );
+                telemetry.addData("Active Servo", "%d", activeServoNdx);
+                telemetry.update();
             }
-            activeServos[0] = sL;
-            activeServos[1] = sR;
-
-            // Update active servo powers
-            if(dpadUpBtnReleased) { servoPowers[sL] = SERVO_MAX_POS; }
-            else if (dpadDownBtnReleased) { servoPowers[sL] = SERVO_MIN_POS; }
-            else if (gamepad1.left_bumper) { servoPowers[sL] += 0.001; }
-            else if (gamepad1.left_trigger >= 0.8) { servoPowers[sL] -= 0.001; }
-
-            if (servoPowers[sL] > SERVO_MAX_POS) { servoPowers[sL] = SERVO_MAX_POS; }
-            else if (servoPowers[sL] < SERVO_MIN_POS) {servoPowers[sL] = SERVO_MIN_POS; }
-
-            // TODO: Add buttons for second servo
-
-
-            // Set servo powers
-            for(int ndx=0; ndx < servos.length; ndx++) { servos[ndx].setPosition(servoPowers[ndx]); }
-
-            // Show data to driver
-            telemetry.addData("Status", "Run Time: " + runtime.toString());
-            telemetry.addData("Motors", "%.02f, %.02f, %.02f, %.02f",
-                    motorPowers[0], motorPowers[1], motorPowers[2], motorPowers[3]);
-            telemetry.addData("Servos", "%.02f, %.02f, %.02f, %.02f, %.02f, %.02f",
-                    servoPowers[0], servoPowers[1], servoPowers[2], servoPowers[3], servoPowers[4], servoPowers[5]);
-            telemetry.addData("Active Servos", "L: %d, R: %d", sL, sR);
-            telemetry.update();
         }
-    }
-
-    // NOTE: 'gamepad.dpad_*' returns 'true' if if the button is actively pressed.
-    // TODO: Add ABXY buttons and their actions
-    private void updateBtnActions() {
-        // Read current button states
-        currentDPadState = new boolean[]{ gamepad1.dpad_up, gamepad1.dpad_right, gamepad1.dpad_down, gamepad1.dpad_left };
-
-        // Reset action states
-        dpadUpBtnPressed = false;
-        dpadRightBtnPressed = false;
-        dpadDownBtnPressed = false;
-        dpadLeftBtnPressed = false;
-
-        dpadUpBtnReleased = false;
-        dpadRightBtnReleased = false;
-        dpadDownBtnReleased = false;
-        dpadLeftBtnReleased = false;
-
-        // Update action states
-        if(lastDPadState != null) {
-            if(!lastDPadState[0] && currentDPadState[0]) { dpadUpBtnPressed = true; }
-            if(!lastDPadState[1] && currentDPadState[1]) { dpadRightBtnPressed = true; }
-            if(!lastDPadState[2] && currentDPadState[2]) { dpadDownBtnPressed = true; }
-            if(!lastDPadState[3] && currentDPadState[3]) { dpadLeftBtnPressed = true; }
-
-            if(lastDPadState[0] && !currentDPadState[0]) { dpadUpBtnReleased = true; }
-            if(lastDPadState[1] && !currentDPadState[1]) { dpadRightBtnReleased = true; }
-            if(lastDPadState[2] && !currentDPadState[2]) { dpadDownBtnReleased = true; }
-            if(lastDPadState[3] && !currentDPadState[3]) { dpadLeftBtnReleased = true; }
-        }
-
-        // Save last button states
-        lastDPadState = currentDPadState;
     }
 }
